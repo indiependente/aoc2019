@@ -23,6 +23,12 @@ func TestIntcodeMachine_Execute(t *testing.T) {
 			want:  `2,0,0,0,99`,
 			err:   EOX,
 		},
+		{
+			name:  "happy path 2 - override halt",
+			input: strings.NewReader(`1,1,1,4,99,5,6,0,99`),
+			want:  `30,1,1,4,2,5,6,0,99`,
+			err:   EOX,
+		},
 	}
 	for _, tt := range tests {
 		tt := tt

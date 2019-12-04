@@ -25,38 +25,6 @@ func (e MachineError) Error() string {
 	return string(e)
 }
 
-type OpCode int
-type Instruction struct {
-	Op    OpCode
-	Term1 int
-	Term2 int
-	Store int
-}
-
-func (i Instruction) String() string {
-	if i.Op == HaltOp {
-		return fmt.Sprintf("%d", i.Op)
-	}
-	return fmt.Sprintf("%d,%d,%d,%d", i.Op, i.Term1, i.Term2, i.Store)
-}
-
-type InstructionSet map[OpCode]func(int, int) (int, error)
-
-type Program []Instruction
-
-func (p Program) String() string {
-	var sb strings.Builder
-	sb.WriteString(p[0].String())
-	for i := 1; i < len(p); i++ {
-		sb.WriteString(",")
-		sb.WriteString(p[i].String())
-	}
-	return sb.String()
-}
-func (p *Program) AddInstruction(i Instruction) {
-	*p = append(*p, i)
-}
-
 type IntcodeMachine struct {
 	Program Program
 	ISet    InstructionSet
@@ -70,10 +38,7 @@ func parseLine(symbols []string) (Instruction, int, error) {
 	if len(symbols) == 1 {
 		if symbols[0] == HaltSym {
 			return Instruction{
-				Op:    OpCode(op),
-				Term1: 0,
-				Term2: 0,
-				Store: 0,
+				OpCode(op),
 			}, 1, nil
 		} else {
 			return Instruction{}, 0, fmt.Errorf("could not parse instruction '%s' : %w", symbols[0], ErrMalformedInstruction)
@@ -93,13 +58,12 @@ func parseLine(symbols []string) (Instruction, int, error) {
 		return Instruction{}, 0, fmt.Errorf("could not parse instruction '%s' : %w", symbols[3], ErrMalformedInstruction)
 	}
 	return Instruction{
-		Op:    OpCode(op),
-		Term1: term1,
-		Term2: term2,
-		Store: store,
+		OpCode(op),
+		OpCode(term1),
+		OpCode(term2),
+		OpCode(store),
 	}, 4, nil
 }
-
 func NewIntcodeMachine(r io.Reader, sep string) (*IntcodeMachine, error) {
 	program := Program{}
 	data, err := ioutil.ReadAll(r)
@@ -149,67 +113,89 @@ func NewIntcodeMachineWithStdISet(r io.Reader, sep string) (*IntcodeMachine, err
 	return m, nil
 }
 
-func (icm *IntcodeMachine) fetch(addr int) (*int, error) {
-	switch addr % 4 {
-	case 0:
-		return (*int)(&(icm.Program[addr/4].Op)), nil
-	case 1:
-		return &(icm.Program[addr/4].Term1), nil
-	case 2:
-		return &(icm.Program[addr/4].Term2), nil
-	case 3:
-		return &(icm.Program[addr/4].Store), nil
-	default:
-		return nil, fmt.Errorf("could not access location [%d,%d]: %w", addr/4, addr%4, ErrBadMemoryAccess)
-	}
-}
+//func (icm *IntcodeMachine) fetch(addr OpCode) (*int, error) {
+//	switch addr % 4 {
+//	case 0:
+//		return (*int)(&(icm.Program[addr/4][0])), nil
+//	case 1:
+//		return (*int)(&(icm.Program[addr/4][1])), nil
+//	case 2:
+//		return (*int)(&(icm.Program[addr/4][2])), nil
+//	case 3:
+//		return (*int)(&(icm.Program[addr/4][3])), nil
+//	default:
+//		return nil, fmt.Errorf("could not access location [%d,%d]: %w", addr/4, addr%4, ErrBadMemoryAccess)
+//	}
+//}
 
 func (icm *IntcodeMachine) AddInstruction(code OpCode, fn func(int, int) (int, error)) error {
 	icm.ISet[code] = fn
 	return nil
 }
 
-func (icm *IntcodeMachine) executeInstruction(i Instruction) error {
-	fn, ok := icm.ISet[i.Op]
+func (icm *IntcodeMachine) executeInstruction(i Instruction, ip int) error {
+	var (
+		a, b int
+		err  error
+	)
+	fn, ok := icm.ISet[i[0]]
 	if !ok {
 		return fmt.Errorf("could not execute instruction %s: %w", i, ErrUnknownOpCode)
 	}
-	a, err := icm.fetch(i.Term1)
-	if err != nil {
-		return fmt.Errorf("could not fetch address %d: %w", i.Term1, err)
+	if i[0] == HaltOp {
+		a, b = 0, 0
+	} else {
+		a = icm.Program[i[1]]
+		b = icm.Program[i[2]]
 	}
-	b, err := icm.fetch(i.Term2)
-	if err != nil {
-		return fmt.Errorf("could not fetch address %d: %w", i.Term2, err)
-	}
-	v, err := fn(*a, *b)
+	v, err := fn(a, b)
 	if err != nil {
 		if err == EOX {
 			return EOX
 		}
 		return fmt.Errorf("could not execute instruction %s", i)
 	}
-	out, err := icm.fetch(i.Store)
-	if err != nil {
-		return fmt.Errorf("could not fetch address %d: %w", i.Store, err)
-	}
-	*out = v
+	icm.Program[i[3]] = v
 	return nil
 }
-
+func (icm *IntcodeMachine) fetch(ip int) (Instruction, int) {
+	var (
+		instr Instruction
+		size  int
+	)
+	if icm.Program[ip] == HaltOp {
+		instr = Instruction{icm.Program[ip]}
+		size = 1
+	} else {
+		instr = Instruction{
+			icm.Program[ip],
+			icm.Program[ip+1],
+			icm.Program[ip+2],
+			icm.Program[ip+3],
+		}
+		size = 4
+	}
+	return instr, size
+}
 func (icm *IntcodeMachine) Execute() error {
-	for _, instr := range icm.Program {
-		err := icm.executeInstruction(instr)
+	for ip := 0; ip < len(icm.Program); {
+		instr, size := icm.fetch(ip)
+		err := icm.executeInstruction(instr, ip)
 		if err != nil {
 			if err == EOX {
 				return EOX
 			}
 			return fmt.Errorf("could not execute instruction")
 		}
+		ip += size
 	}
 	return nil
 }
 
 func (icm *IntcodeMachine) String() string {
 	return icm.Program.String()
+}
+
+func intPtr(i int) *int {
+	return &i
 }
