@@ -29,6 +29,12 @@ func TestIntcodeMachine_Execute(t *testing.T) {
 			want:  `30,1,1,4,2,5,6,0,99`,
 			err:   EOX,
 		},
+		//{
+		//	name:  "happy path 3",
+		//	input: strings.NewReader(`2,4,4,5,99,0`),
+		//	want:  `2,4,4,5,99,9801`,
+		//	err:   EOX,
+		//},
 	}
 	for _, tt := range tests {
 		tt := tt

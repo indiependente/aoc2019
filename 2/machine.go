@@ -15,6 +15,7 @@ const (
 	HaltSym                 string       = `99`
 	ErrMalformedInstruction MachineError = `malformed instruction`
 	ErrUnknownOpCode        MachineError = `unknown operation code`
+	ErrBadMemoryAccess      MachineError = `unexpected access to memory address`
 	EOX                     MachineError = `end of execution`
 )
 
@@ -27,6 +28,8 @@ func (e MachineError) Error() string {
 type IntcodeMachine struct {
 	Program Program
 	ISet    InstructionSet
+	rawData []byte
+	sep     string
 }
 
 func parseLine(symbols []string) (Instruction, int, error) {
@@ -63,12 +66,9 @@ func parseLine(symbols []string) (Instruction, int, error) {
 		store,
 	}, 4, nil
 }
-func NewIntcodeMachine(r io.Reader, sep string) (*IntcodeMachine, error) {
+
+func parseProgram(data []byte, sep string) (Program, error) {
 	program := Program{}
-	data, err := ioutil.ReadAll(r)
-	if err != nil {
-		return nil, fmt.Errorf("could not instantiate machine: %w", err)
-	}
 	symbols := strings.Split(string(data), sep)
 	for i := 0; i < len(symbols); {
 		var line []string
@@ -84,11 +84,25 @@ func NewIntcodeMachine(r io.Reader, sep string) (*IntcodeMachine, error) {
 		program.AddInstruction(instr)
 		i += size
 	}
+	return program, nil
+}
+func NewIntcodeMachine(r io.Reader, sep string) (*IntcodeMachine, error) {
+	data, err := ioutil.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("could not instantiate machine: %w", err)
+	}
+	program, err := parseProgram(data, sep)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse program: %w", err)
+	}
 	return &IntcodeMachine{
 		Program: program,
 		ISet:    make(InstructionSet),
+		rawData: data,
+		sep:     sep,
 	}, nil
 }
+
 func NewIntcodeMachineWithStdISet(r io.Reader, sep string) (*IntcodeMachine, error) {
 	m, err := NewIntcodeMachine(r, sep)
 	if err != nil {
@@ -173,6 +187,26 @@ func (icm *IntcodeMachine) Execute() error {
 		}
 		ip += size
 	}
+	return nil
+}
+
+func (icm *IntcodeMachine) Print(addr int) (string, error) {
+	if addr >= len(icm.Program) {
+		return "", fmt.Errorf("could not set code: %w", ErrBadMemoryAccess)
+	}
+	return fmt.Sprintf("%d", icm.Program[addr]), nil
+}
+
+func (icm *IntcodeMachine) Reset() {
+	program, _ := parseProgram(icm.rawData, icm.sep)
+	icm.Program = program
+}
+
+func (icm *IntcodeMachine) SetOpCode(addr int, code OpCode) error {
+	if addr >= len(icm.Program) {
+		return fmt.Errorf("could not set code: %w", ErrBadMemoryAccess)
+	}
+	icm.Program[addr] = code
 	return nil
 }
 
