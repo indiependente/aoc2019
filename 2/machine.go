@@ -15,7 +15,6 @@ const (
 	HaltSym                 string       = `99`
 	ErrMalformedInstruction MachineError = `malformed instruction`
 	ErrUnknownOpCode        MachineError = `unknown operation code`
-	ErrBadMemoryAccess      MachineError = `unexpected access to memory location`
 	EOX                     MachineError = `end of execution`
 )
 
@@ -38,7 +37,7 @@ func parseLine(symbols []string) (Instruction, int, error) {
 	if len(symbols) == 1 {
 		if symbols[0] == HaltSym {
 			return Instruction{
-				OpCode(op),
+				op,
 			}, 1, nil
 		} else {
 			return Instruction{}, 0, fmt.Errorf("could not parse instruction '%s' : %w", symbols[0], ErrMalformedInstruction)
@@ -58,10 +57,10 @@ func parseLine(symbols []string) (Instruction, int, error) {
 		return Instruction{}, 0, fmt.Errorf("could not parse instruction '%s' : %w", symbols[3], ErrMalformedInstruction)
 	}
 	return Instruction{
-		OpCode(op),
-		OpCode(term1),
-		OpCode(term2),
-		OpCode(store),
+		op,
+		term1,
+		term2,
+		store,
 	}, 4, nil
 }
 func NewIntcodeMachine(r io.Reader, sep string) (*IntcodeMachine, error) {
@@ -112,21 +111,6 @@ func NewIntcodeMachineWithStdISet(r io.Reader, sep string) (*IntcodeMachine, err
 	}
 	return m, nil
 }
-
-//func (icm *IntcodeMachine) fetch(addr OpCode) (*int, error) {
-//	switch addr % 4 {
-//	case 0:
-//		return (*int)(&(icm.Program[addr/4][0])), nil
-//	case 1:
-//		return (*int)(&(icm.Program[addr/4][1])), nil
-//	case 2:
-//		return (*int)(&(icm.Program[addr/4][2])), nil
-//	case 3:
-//		return (*int)(&(icm.Program[addr/4][3])), nil
-//	default:
-//		return nil, fmt.Errorf("could not access location [%d,%d]: %w", addr/4, addr%4, ErrBadMemoryAccess)
-//	}
-//}
 
 func (icm *IntcodeMachine) AddInstruction(code OpCode, fn func(int, int) (int, error)) error {
 	icm.ISet[code] = fn
@@ -194,8 +178,4 @@ func (icm *IntcodeMachine) Execute() error {
 
 func (icm *IntcodeMachine) String() string {
 	return icm.Program.String()
-}
-
-func intPtr(i int) *int {
-	return &i
 }
