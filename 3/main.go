@@ -16,6 +16,10 @@ import (
 type Point struct {
 	x, y int
 }
+type WeightedIntersection struct {
+	p Point
+	w int
+}
 type Segment struct {
 	a, b Point
 }
@@ -23,6 +27,8 @@ type Wire struct {
 	segments []Segment
 	symbol   rune
 }
+
+// TODO: switch from Grid to Segment based
 type Grid map[int]map[int]rune
 
 func (g Grid) Get(x, y int) rune {
@@ -36,8 +42,8 @@ func (g Grid) Marked(x, y int) bool {
 func (g Grid) Mark(x, y int, r rune) {
 	g[x][y] = r
 }
-func (g Grid) MarkRow(row, from, to int, r rune) []Point {
-	var intersections []Point
+func (g Grid) MarkRow(row, from, to int, r rune) []WeightedIntersection {
+	var intersections []WeightedIntersection
 	if from > to {
 		from, to = to, from
 	}
@@ -49,7 +55,11 @@ func (g Grid) MarkRow(row, from, to int, r rune) []Point {
 		v, ok := g[row][i]
 		if ok {
 			if v != r {
-				intersections = append(intersections, Point{row, i})
+				fmt.Printf("intersection [%d %d] steps = %d\n", row, i, int(math.Abs(float64(from-i))))
+				intersections = append(intersections, WeightedIntersection{
+					p: Point{row, i},
+					w: int(math.Abs(float64(from - i))),
+				})
 				continue
 			}
 		}
@@ -57,8 +67,8 @@ func (g Grid) MarkRow(row, from, to int, r rune) []Point {
 	}
 	return intersections
 }
-func (g Grid) MarkCol(col, from, to int, r rune) []Point {
-	var intersections []Point
+func (g Grid) MarkCol(col, from, to int, r rune) []WeightedIntersection {
+	var intersections []WeightedIntersection
 	if from > to {
 		from, to = to, from
 	}
@@ -70,7 +80,11 @@ func (g Grid) MarkCol(col, from, to int, r rune) []Point {
 		v, ok := g[i][col]
 		if ok {
 			if v != r {
-				intersections = append(intersections, Point{i, col})
+				fmt.Printf("intersection [%d %d] steps = %d\n", i, col, int(math.Abs(float64(from-i))))
+				intersections = append(intersections, WeightedIntersection{
+					p: Point{i, col},
+					w: int(math.Abs(float64(from - i))),
+				})
 				continue
 			}
 		}
@@ -89,22 +103,29 @@ func main() {
 		log.Fatal(err)
 	}
 	defer f.Close()
-	closestPoint, dist := FindClosestIntersection(f)
-	fmt.Printf("Closest point: [%d %d]\n", closestPoint.x, closestPoint.y)
-	fmt.Printf("Manhattan distance = %f\n", dist)
+	closestPoint, cheapest, dist := FindClosestIntersection(f)
+	fmt.Printf("Closest point: [%d %d]\nManhattan distance = %f\n", closestPoint.x, closestPoint.y, dist)
+	fmt.Printf("Cheapest point (steps): [%d %d]\nNo. Steps = %d\n", cheapest.p.x, cheapest.p.y, cheapest.w)
 }
 
-func FindClosestIntersection(r io.Reader) (Point, float64) {
+func FindClosestIntersection(r io.Reader) (Point, WeightedIntersection, float64) {
 	var (
 		closestPoint = Point{
-			x: int(math.Inf(0)),
-			y: int(math.Inf(0)),
+			x: math.MaxInt32,
+			y: math.MaxInt32,
 		}
 		origin = Point{
 			x: 0,
 			y: 0,
 		}
 		shortestDistance = manhattanDistance(closestPoint, origin)
+		cheapestPoint    = WeightedIntersection{
+			p: Point{
+				x: math.MaxInt32,
+				y: math.MaxInt32,
+			},
+			w: math.MaxInt32,
+		}
 	)
 	g := make(Grid)
 	s := bufio.NewScanner(r)
@@ -123,30 +144,30 @@ func FindClosestIntersection(r io.Reader) (Point, float64) {
 			case 'R':
 				fmt.Printf("%c: %c %d => [%d, %d]\n", wire, d, cells, x, y+cells)
 				intersections := g.MarkRow(x, y, y+cells, wire)
-				closestPoint, shortestDistance = updateClosest(closestPoint, shortestDistance, intersections)
+				closestPoint, cheapestPoint, shortestDistance = updateClosest(closestPoint, shortestDistance, cheapestPoint, intersections)
 				y += cells
 			case 'L':
 				fmt.Printf("%c: %c %d => [%d, %d]\n", wire, d, cells, x, y-cells)
 				intersections := g.MarkRow(x, y, y-cells, wire)
-				closestPoint, shortestDistance = updateClosest(closestPoint, shortestDistance, intersections)
+				closestPoint, cheapestPoint, shortestDistance = updateClosest(closestPoint, shortestDistance, cheapestPoint, intersections)
 				y -= cells
 			case 'U':
 				fmt.Printf("%c: %c %d => [%d, %d]\n", wire, d, cells, x+cells, y)
 				intersections := g.MarkCol(y, x, x+cells, wire)
-				closestPoint, shortestDistance = updateClosest(closestPoint, shortestDistance, intersections)
+				closestPoint, cheapestPoint, shortestDistance = updateClosest(closestPoint, shortestDistance, cheapestPoint, intersections)
 				x += cells
 			case 'D':
 				fmt.Printf("%c: %c %d => [%d, %d]\n", wire, d, cells, x-cells, y)
 				intersections := g.MarkCol(y, x, x-cells, wire)
-				closestPoint, shortestDistance = updateClosest(closestPoint, shortestDistance, intersections)
+				closestPoint, cheapestPoint, shortestDistance = updateClosest(closestPoint, shortestDistance, cheapestPoint, intersections)
 				x -= cells
 			}
 		}
 	}
-	return closestPoint, shortestDistance
+	return closestPoint, cheapestPoint, shortestDistance
 }
 
-func updateClosest(closestPoint Point, shortestDistance float64, intersections []Point) (Point, float64) {
+func updateClosest(closestPoint Point, shortestDistance float64, cheapestPoint WeightedIntersection, intersections []WeightedIntersection) (Point, WeightedIntersection, float64) {
 	var (
 		origin = Point{0, 0}
 	)
@@ -154,17 +175,20 @@ func updateClosest(closestPoint Point, shortestDistance float64, intersections [
 		fmt.Println(intersections)
 	}
 	for _, isect := range intersections {
-		if isect == origin {
+		if isect.p == origin {
 			continue
 		}
-		dist := manhattanDistance(isect, origin)
+		dist := manhattanDistance(isect.p, origin)
 		if dist < shortestDistance {
-			closestPoint = isect
+			closestPoint = isect.p
 			shortestDistance = dist
-			fmt.Printf("intersection point: [%d %d] => %f\n", isect.x, isect.y, dist)
+		}
+		if isect.w < cheapestPoint.w {
+			cheapestPoint = isect
+			fmt.Printf("cheap intersection point: [%d %d] => %d\n", isect.p.x, isect.p.y, isect.w)
 		}
 	}
-	return closestPoint, shortestDistance
+	return closestPoint, cheapestPoint, shortestDistance
 }
 
 func randomRune() rune {
